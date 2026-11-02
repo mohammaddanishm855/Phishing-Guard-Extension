@@ -46,7 +46,7 @@ flowchart LR
 ## 📸 Project Screenshots
 
 ### Extension Interface
-![Phishing Guard Extension](docs/images/extension-popup.png)
+![Phishing Guard Extension](extension/docs/images/extension-popup.png)
 
 ### Website Security Report
 ![Website Security Report](docs/images/website-security-report.png)
