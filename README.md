@@ -49,7 +49,7 @@ flowchart LR
 ![Phishing Guard Extension](extension/docs/images/extension-popup.png)
 
 ### Website Security Report
-![Website Security Report](docs/images/website-security-report.png)
+![Website Security Report](extension/docs/images/website-security-report.png)
 
 ## ⚙️ Run Locally
 
