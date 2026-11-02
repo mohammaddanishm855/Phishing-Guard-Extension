@@ -1,0 +1,87 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phishing Guard</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+    <div class="container">
+
+        <header>
+            <div class="logo">🛡️</div>
+            <div>
+                <h1>Phishing Guard</h1>
+                <p>AI-Powered Browser Security</p>
+            </div>
+        </header>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            <span id="connectionStatus">Checking backend...</span>
+        </div>
+
+        <nav class="tabs">
+            <button class="tab active" data-section="website">Website</button>
+            <button class="tab" data-section="email">Email</button>
+            <button class="tab" data-section="file">File</button>
+        </nav>
+
+        <section id="website" class="section active">
+            <h2>Website Scanner</h2>
+            <p>Check a website for suspicious URL indicators.</p>
+
+            <input
+                type="text"
+                id="urlInput"
+                placeholder="Enter website URL"
+            >
+
+            <button id="scanUrlBtn" class="scan-button">
+                Scan Website
+            </button>
+
+            <div id="urlResult" class="result hidden"></div>
+        </section>
+
+        <section id="email" class="section">
+            <h2>Email Scanner</h2>
+            <p>Paste an email to check for phishing indicators.</p>
+
+            <textarea
+                id="emailInput"
+                placeholder="Paste the complete email here..."
+            ></textarea>
+
+            <button id="scanEmailBtn" class="scan-button">
+                Scan Email
+            </button>
+
+            <div id="emailResult" class="result hidden"></div>
+        </section>
+
+        <section id="file" class="section">
+            <h2>Attachment Scanner</h2>
+            <p>Upload an attachment for malware analysis.</p>
+
+            <input type="file" id="fileInput">
+
+            <button id="scanFileBtn" class="scan-button">
+                Scan Attachment
+            </button>
+
+            <div id="fileResult" class="result hidden"></div>
+        </section>
+
+        <footer>
+            <p>Phishing Guard | Local Security Engine</p>
+        </footer>
+
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,1380 @@
+
+
+========== CELL 105 ==========
+
+import ipaddress
+import re
+from urllib.parse import urlsplit, unquote
+
+
+URL_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "is.gd", "ow.ly",
+    "rb.gy", "cutt.ly", "shorturl.at", "rebrand.ly"
+}
+
+HIGH_RISK_EXTENSIONS = {
+    ".exe", ".scr", ".bat", ".cmd", ".ps1", ".vbs",
+    ".js", ".hta", ".msi", ".iso", ".img", ".lnk"
+}
+
+BRAND_DOMAINS = {
+    "paypal": ["paypal.com"],
+    "microsoft": ["microsoft.com", "live.com", "office.com"],
+    "google": ["google.com"],
+    "apple": ["apple.com"],
+    "amazon": ["amazon.com"],
+    "facebook": ["facebook.com", "fb.com"],
+    "instagram": ["instagram.com"],
+    "netflix": ["netflix.com"],
+    "outlook": ["outlook.com", "office.com"]
+}
+
+SUSPICIOUS_URL_TERMS = {
+    "login", "verify", "password", "account", "wallet",
+    "reset", "secure", "update", "bank", "signin",
+    "auth", "credential", "payment", "confirm", "recover"
+}
+
+
+def _domain_matches(hostname, domain):
+    """True only for the domain itself or a genuine subdomain."""
+    return hostname == domain or hostname.endswith("." + domain)
+
+
+def analyze_url(url):
+    """
+    Explainable URL risk analysis.
+    This is a heuristic detector, not a definitive reputation verdict.
+    """
+
+    result = {
+        "url": str(url),
+        "hostname": "",
+        "risk_indicators": [],
+        "indicator_count": 0,
+        "risk_score": 0,
+        "risk_level": "UNKNOWN",
+        "verdict": "UNKNOWN",
+        "detection_method": "HEURISTIC",
+        "limitations": [
+            "No heuristic can prove a URL is safe or malicious.",
+            "Live reputation and redirect checks are not performed here."
+        ]
+    }
+
+    if not isinstance(url, str) or not url.strip():
+        result["risk_indicators"] = ["Empty or invalid URL input"]
+        result["indicator_count"] = 1
+        result["risk_score"] = 20
+        result["risk_level"] = "MEDIUM"
+        result["verdict"] = "SUSPICIOUS"
+        return result
+
+    original_url = url.strip()
+
+    # Parse first, then validate. Never visit or download the URL here.
+    candidate = original_url
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", candidate):
+        candidate = "https://" + candidate
+
+    try:
+        parsed = urlsplit(candidate)
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port  # May raise ValueError for malformed ports.
+    except ValueError:
+        result["risk_indicators"] = ["Malformed URL or invalid port"]
+        result["indicator_count"] = 1
+        result["risk_score"] = 35
+        result["risk_level"] = "HIGH"
+        result["verdict"] = "SUSPICIOUS"
+        return result
+
+    result["hostname"] = hostname
+
+    score = 0
+    indicators = []
+
+    def flag(points, reason):
+        nonlocal score
+        score += points
+        indicators.append(reason)
+
+    if parsed.scheme.lower() not in {"http", "https"}:
+        flag(25, "Uses an unexpected URL scheme")
+
+    if not hostname or "." not in hostname:
+        flag(20, "Hostname is missing or unusual")
+
+    if parsed.username is not None or parsed.password is not None:
+        flag(25, "Contains user information before the hostname")
+
+    try:
+        ipaddress.ip_address(hostname)
+        flag(25, "Uses an IP address instead of a domain name")
+    except ValueError:
+        pass
+
+    if hostname in URL_SHORTENERS:
+        flag(15, "Uses a known URL-shortening service")
+
+    if any(label.startswith("xn--") for label in hostname.split(".")):
+        flag(20, "Contains a Punycode domain label")
+
+    if len(candidate) > 180:
+        flag(10, "URL is unusually long")
+    elif len(candidate) > 100:
+        flag(5, "URL is longer than typical")
+
+    if len(hostname.split(".")) >= 5:
+        flag(10, "Contains an unusually deep subdomain structure")
+
+    if port is not None and port not in {80, 443}:
+        flag(10, "Uses a non-standard web port")
+
+    decoded_url = unquote(candidate).lower()
+    matched_terms = sorted(
+        term for term in SUSPICIOUS_URL_TERMS
+        if re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])",
+                     decoded_url)
+    )
+    if matched_terms:
+        # Keywords are weak evidence; do not treat them as proof.
+        flag(5, "Contains sensitive terms: " + ", ".join(matched_terms))
+
+    path_lower = parsed.path.lower()
+    if any(path_lower.endswith(ext) for ext in HIGH_RISK_EXTENSIONS):
+        flag(20, "URL path ends in a potentially risky executable or script extension")
+
+    # Detect brand names used in a hostname that is not the real brand domain.
+    # Example: paypal.com.attacker.example is not paypal.com.
+    brand_impersonation = []
+    for brand, legitimate_domains in BRAND_DOMAINS.items():
+        if brand in hostname:
+            if not any(
+                _domain_matches(hostname, domain)
+                for domain in legitimate_domains
+            ):
+                brand_impersonation.append(brand)
+
+    if brand_impersonation:
+        flag(
+            25,
+            "Possible brand impersonation in hostname: "
+            + ", ".join(sorted(brand_impersonation))
+        )
+
+    score = min(score, 100)
+
+    if score >= 60:
+        risk_level = "HIGH"
+    elif score >= 30:
+        risk_level = "MEDIUM"
+    elif score > 0:
+        risk_level = "LOW"
+    else:
+        risk_level = "LOW"
+
+    # Keep the existing verdict names so the combined risk engine can use them.
+    verdict = "SUSPICIOUS" if score >= 20 else "NO OBVIOUS INDICATORS"
+
+    result.update({
+        "risk_indicators": indicators,
+        "indicator_count": len(indicators),
+        "risk_score": score,
+        "risk_level": risk_level,
+        "verdict": verdict,
+        "matched_sensitive_terms": matched_terms,
+        "possible_brand_impersonation": brand_impersonation
+    })
+
+    return result
+
+
+========== CELL 106 ==========
+
+from email import policy
+from email.parser import Parser
+from email.utils import parseaddr
+import re
+
+
+BRAND_EMAIL_DOMAINS = {
+    "paypal": {"paypal.com"},
+    "microsoft": {"microsoft.com", "outlook.com", "live.com", "office.com"},
+    "google": {"google.com", "gmail.com"},
+    "apple": {"apple.com", "icloud.com"},
+    "amazon": {"amazon.com"},
+    "netflix": {"netflix.com"},
+    "facebook": {"facebook.com", "fb.com"},
+}
+
+PHISHING_PHRASES = {
+    "verify your account": 10,
+    "account suspended": 15,
+    "password expires": 10,
+    "confirm your password": 15,
+    "unusual activity": 8,
+    "payment failed": 8,
+    "urgent action required": 12,
+    "click here immediately": 10,
+    "wire transfer": 8,
+    "gift card": 8,
+    "update your payment": 10,
+    "your account will be closed": 12,
+}
+
+
+def _email_domain(address):
+    """Extract and normalize a domain from an email address."""
+    _, address = parseaddr(str(address or ""))
+    if "@" not in address:
+        return ""
+    return address.rsplit("@", 1)[1].strip().lower().rstrip(".")
+
+
+def _domain_is_exact_or_subdomain(host, domain):
+    return host == domain or host.endswith("." + domain)
+
+
+def analyze_email_phishing(raw_email):
+    """
+    Score email-level phishing indicators.
+
+    This function does not execute attachments, visit links,
+    or treat missing authentication headers as a failure.
+    """
+
+    message = Parser(policy=policy.default).parsestr(raw_email or "")
+
+    sender_name, sender_address = parseaddr(
+        str(message.get("From", ""))
+    )
+    reply_name, reply_address = parseaddr(
+        str(message.get("Reply-To", ""))
+    )
+
+    sender_domain = _email_domain(sender_address)
+    reply_domain = _email_domain(reply_address)
+
+    subject = str(message.get("Subject", ""))
+    body_parts = []
+
+    for part in message.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
+        if part.get_content_type() not in {"text/plain", "text/html"}:
+            continue
+
+        try:
+            content = part.get_content()
+            if isinstance(content, str):
+                body_parts.append(content)
+        except (KeyError, TypeError, UnicodeError):
+            continue
+
+    body = "\n".join(body_parts)
+    combined_text = f"{subject}\n{body}".lower()
+
+    score = 0
+    findings = []
+
+    def add_finding(points, category, detail):
+        nonlocal score
+        score += points
+        findings.append({
+            "category": category,
+            "points": points,
+            "detail": detail
+        })
+
+    # 1. Sender and reply-to mismatch
+    if sender_domain and reply_domain and sender_domain != reply_domain:
+        add_finding(
+            15,
+            "sender_mismatch",
+            f"From domain ({sender_domain}) differs from "
+            f"Reply-To domain ({reply_domain})."
+        )
+
+    # 2. Authentication results, if a trusted mail system supplied them
+    auth_headers = message.get_all("Authentication-Results", [])
+    auth_text = " ".join(str(value) for value in auth_headers).lower()
+
+    auth_status = {}
+
+    for mechanism in ("spf", "dkim", "dmarc"):
+        matches = re.findall(
+            rf"\b{mechanism}\s*=\s*(pass|fail|softfail|neutral|none|temperror|permerror)\b",
+            auth_text
+        )
+        if matches:
+            auth_status[mechanism] = matches
+
+            if "fail" in matches:
+                add_finding(
+                    15,
+                    "email_authentication",
+                    f"{mechanism.upper()} authentication reported fail."
+                )
+            elif "softfail" in matches:
+                add_finding(
+                    7,
+                    "email_authentication",
+                    f"{mechanism.upper()} authentication reported softfail."
+                )
+
+    # Missing authentication results are unknown, not a failure.
+    if not auth_headers:
+        auth_note = "Authentication-Results header not provided."
+    else:
+        auth_note = "Authentication results were present; inspect the sending mail system."
+
+    # 3. Brand name in the display name with an unrelated sender domain
+    display_name = sender_name.lower()
+
+    for brand, legitimate_domains in BRAND_EMAIL_DOMAINS.items():
+        if brand in display_name:
+            if sender_domain and not any(
+                _domain_is_exact_or_subdomain(sender_domain, domain)
+                for domain in legitimate_domains
+            ):
+                add_finding(
+                    20,
+                    "possible_brand_impersonation",
+                    f"Display name references {brand}, but sender domain "
+                    f"is {sender_domain}."
+                )
+                break
+
+    # 4. Social-engineering phrases
+    matched_phrases = []
+
+    for phrase, points in PHISHING_PHRASES.items():
+        if phrase in combined_text:
+            matched_phrases.append(phrase)
+
+    if matched_phrases:
+        # Cap wording evidence to avoid over-weighting a long email.
+        language_points = min(
+            25,
+            sum(PHISHING_PHRASES[phrase] for phrase in matched_phrases)
+        )
+        add_finding(
+            language_points,
+            "social_engineering_language",
+            "Potentially manipulative wording: "
+            + ", ".join(sorted(matched_phrases))
+        )
+
+    # 5. URL evidence from the existing analyzer
+    extracted_urls = []
+
+    for part in message.walk():
+        if part.get_content_type() == "text/html":
+            try:
+                from html.parser import HTMLParser
+
+                class _LinkExtractor(HTMLParser):
+                    def __init__(self):
+                        super().__init__()
+                        self.links = []
+
+                    def handle_starttag(self, tag, attrs):
+                        if tag.lower() == "a":
+                            for key, value in attrs:
+                                if key.lower() == "href" and value:
+                                    self.links.append(value)
+
+                parser = _LinkExtractor()
+                parser.feed(part.get_content())
+                extracted_urls.extend(parser.links)
+            except (KeyError, TypeError, UnicodeError):
+                pass
+
+    # Extract plain-text URLs as well.
+    extracted_urls.extend(
+        re.findall(r"""https?://[^\s<>"']+""", body, flags=re.IGNORECASE)
+    )
+    extracted_urls = list(dict.fromkeys(extracted_urls))
+
+    url_results = [analyze_url(url) for url in extracted_urls]
+
+    high_risk_urls = [
+        item for item in url_results
+        if item.get("risk_score", 0) >= 30
+        or item.get("verdict") == "MALICIOUS"
+    ]
+
+    if high_risk_urls:
+        add_finding(
+            min(30, 15 * len(high_risk_urls)),
+            "suspicious_urls",
+            f"{len(high_risk_urls)} URL(s) have elevated heuristic risk."
+        )
+
+    score = min(score, 100)
+
+    if score >= 60:
+        risk_level = "HIGH"
+    elif score >= 30:
+        risk_level = "MEDIUM"
+    elif score >= 10:
+        risk_level = "LOW"
+    else:
+        risk_level = "MINIMAL"
+
+    return {
+        "sender_name": sender_name,
+        "sender_address": sender_address,
+        "sender_domain": sender_domain,
+        "reply_to": reply_address,
+        "reply_to_domain": reply_domain,
+        "subject": subject,
+        "authentication_status": auth_status,
+        "authentication_note": auth_note,
+        "matched_phishing_phrases": matched_phrases,
+        "extracted_urls": extracted_urls,
+        "url_analysis": url_results,
+        "risk_score": score,
+        "risk_level": risk_level,
+        "verdict": (
+            "SUSPICIOUS" if score >= 30
+            else "REVIEW" if score >= 10
+            else "NO STRONG INDICATORS"
+        ),
+        "findings": findings,
+        "limitations": [
+            "This is a heuristic score, not a calibrated probability.",
+            "Authentication headers can be forged outside a trusted mail path.",
+            "Missing authentication results are not treated as authentication failure.",
+            "Low risk does not prove the email is legitimate."
+        ]
+    }
+
+
+========== CELL 107 ==========
+
+def add_malware_verdicts(attachment_reports):
+    """
+    Combine Defender, YARA and VirusTotal results conservatively.
+
+    Scanner errors and unavailable reputation data are never
+    interpreted as proof that an attachment is clean.
+    """
+
+    for attachment in attachment_reports:
+        defender = attachment.get("defender") or {}
+        yara = attachment.get("yara") or {}
+        vt = attachment.get("virustotal") or {}
+
+        defender_status = str(
+            defender.get("status", "")
+        ).strip().upper()
+
+        yara_status = str(
+            yara.get("status", "")
+        ).strip().upper()
+
+        vt_status = str(
+            vt.get("status", "")
+        ).strip().upper()
+
+        stats = (
+            vt.get("last_analysis_stats")
+            or vt.get("stats")
+            or {}
+        )
+
+        try:
+            malicious_count = int(stats.get("malicious", 0) or 0)
+            suspicious_count = int(stats.get("suspicious", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            malicious_count = 0
+            suspicious_count = 0
+
+        indicators = []
+        scan_errors = []
+
+        # Defender detection
+        if defender_status in {
+            "THREAT_FOUND", "THREATS_FOUND", "MALICIOUS"
+        }:
+            indicators.append("Microsoft Defender reported a threat")
+
+        elif defender_status in {
+            "ERROR", "FAILED", "SCAN_ERROR", "TIMEOUT"
+        }:
+            scan_errors.append("Microsoft Defender scan failed")
+
+        # VirusTotal detection
+        if malicious_count > 0 or vt_status in {
+            "MALICIOUS", "THREAT_FOUND", "THREATS_FOUND"
+        }:
+            indicators.append(
+                f"VirusTotal malicious detections: {malicious_count}"
+            )
+
+        if suspicious_count > 0:
+            indicators.append(
+                f"VirusTotal suspicious detections: {suspicious_count}"
+            )
+
+        if vt_status in {"ERROR", "FAILED", "TIMEOUT"}:
+            scan_errors.append("VirusTotal lookup failed")
+
+        # YARA detection
+        if yara_status == "MATCH":
+            indicators.append("One or more YARA rules matched")
+
+        elif yara_status in {
+            "ERROR", "RULES_NOT_FOUND", "FAILED"
+        }:
+            scan_errors.append("YARA scan incomplete")
+
+        # Make the verdict
+        if any(
+            item.startswith("Microsoft Defender reported a threat")
+            or item.startswith("VirusTotal malicious detections:")
+            for item in indicators
+        ):
+            verdict = "MALICIOUS_INDICATORS_DETECTED"
+
+        elif indicators:
+            verdict = "SUSPICIOUS_REQUIRES_REVIEW"
+
+        elif scan_errors:
+            verdict = "INCOMPLETE_SCAN"
+
+        elif (
+            defender_status in {
+                "NO_THREATS_FOUND", "NO_THREAT_FOUND", "CLEAN"
+            }
+            and yara_status == "NO_MATCH"
+            and vt_status in {
+                "CLEAN", "NO_THREATS_FOUND", "NO_THREAT_FOUND"
+            }
+        ):
+            verdict = "NO_KNOWN_THREATS_DETECTED_REQUIRES_CAUTION"
+
+        else:
+            verdict = "UNKNOWN_REQUIRES_REVIEW"
+
+        attachment["malware_verdict"] = verdict
+        attachment["malware_indicators"] = indicators
+        attachment["malware_scan_errors"] = scan_errors
+
+    return attachment_reports
+
+
+========== CELL 108 ==========
+
+def enhance_combined_assessment(
+    base_assessment,
+    email_phishing_result,
+    attachment_results
+):
+    """
+    Enrich the existing assessment with email-level and malware findings.
+    Confirmed malicious detections override a low base risk score.
+    """
+
+    import copy
+
+    assessment = copy.deepcopy(base_assessment or {})
+    findings = list(assessment.get("findings") or [])
+
+    # Preserve the original score and findings for traceability.
+    assessment["base_risk_score"] = assessment.get("risk_score", 0)
+
+    try:
+        base_score = int(assessment.get("risk_score", 0) or 0)
+    except (TypeError, ValueError):
+        base_score = 0
+
+    extra_score = 0
+    confirmed_malware = False
+    suspicious_malware = False
+    incomplete_scans = False
+
+    # Add email classifier findings as supporting evidence.
+    if email_phishing_result:
+        for item in email_phishing_result.get("findings", []):
+            detail = item.get("detail", "Email indicator detected")
+            points = item.get("points", 0)
+
+            findings.append({
+                "source": "Email phishing classifier",
+                "finding": detail,
+                "points": points
+            })
+
+        email_score = email_phishing_result.get("risk_score", 0)
+        try:
+            extra_score += min(20, max(0, int(email_score)) // 3)
+        except (TypeError, ValueError):
+            pass
+
+    # Interpret the normalized attachment verdicts.
+    for attachment in attachment_results or []:
+        if not isinstance(attachment, dict):
+            continue
+
+        verdict = str(
+            attachment.get("malware_verdict", "")
+        ).strip().upper()
+
+        filename = (
+            attachment.get("filename")
+            or attachment.get("file_name")
+            or "Unknown attachment"
+        )
+
+        if verdict == "MALICIOUS_INDICATORS_DETECTED":
+            confirmed_malware = True
+            findings.append({
+                "source": "Malware analysis",
+                "finding": (
+                    f"{filename}: malicious indicators were reported "
+                    "by one or more scanners."
+                ),
+                "points": 0
+            })
+
+        elif verdict == "SUSPICIOUS_REQUIRES_REVIEW":
+            suspicious_malware = True
+            extra_score += 15
+            findings.append({
+                "source": "Malware analysis",
+                "finding": (
+                    f"{filename}: suspicious indicators require review."
+                ),
+                "points": 15
+            })
+
+        elif verdict in {
+            "INCOMPLETE_SCAN",
+            "UNKNOWN_REQUIRES_REVIEW"
+        }:
+            incomplete_scans = True
+            findings.append({
+                "source": "Malware analysis",
+                "finding": (
+                    f"{filename}: scan results are incomplete or unknown; "
+                    "this does not establish that the file is safe."
+                ),
+                "points": 0
+            })
+
+    score = min(100, max(0, base_score + extra_score))
+
+    # Confirmed malicious evidence must not be hidden by a low score.
+    if confirmed_malware:
+        score = max(score, 85)
+        risk_level = "CRITICAL"
+        recommended_action = (
+            "Isolate the attachment and follow incident-response "
+            "procedures. Do not open or execute the file."
+        )
+    elif score >= 70:
+        risk_level = "HIGH"
+        recommended_action = (
+            "Hold the message for investigation; do not open attachments "
+            "or follow links."
+        )
+    elif score >= 35:
+        risk_level = "MEDIUM"
+        recommended_action = (
+            "Review the message, sender identity, URLs and attachment "
+            "evidence before taking action."
+        )
+    elif suspicious_malware:
+        risk_level = "MEDIUM"
+        recommended_action = (
+            "Quarantine or hold the suspicious attachment for manual review."
+        )
+    elif incomplete_scans:
+        risk_level = "LOW — INCOMPLETE SCAN"
+        recommended_action = (
+            "Some scan results are unavailable. Do not interpret this "
+            "assessment as proof that the message or files are safe."
+        )
+    else:
+        risk_level = "LOW"
+        recommended_action = (
+            "No strong threat evidence was identified. Use caution; "
+            "a low score does not prove the message is legitimate."
+        )
+
+    assessment.update({
+        "risk_score": score,
+        "risk_level": risk_level,
+        "findings": findings,
+        "recommended_action": recommended_action,
+        "malware_confirmed": confirmed_malware,
+        "malware_suspicious": suspicious_malware,
+        "scan_incomplete": incomplete_scans,
+        "email_phishing_score": (
+            email_phishing_result.get("risk_score")
+            if email_phishing_result else None
+        )
+    })
+
+    return assessment
+
+
+========== CELL 109 ==========
+
+def build_final_assessment(
+    email_result,
+    attachment_results,
+    base_assessment=None,
+    yara_results=None,
+):
+    """Combine email and attachment evidence into a cautious risk assessment."""
+
+    findings = []
+    seen = set()
+    score = 0
+
+    malware_confirmed = False
+    malware_suspicious = False
+    scan_incomplete = False
+
+    def add_finding(source, message, points=0):
+        nonlocal score
+
+        key = (source.lower(), message.strip().lower())
+        if key in seen:
+            return
+
+        seen.add(key)
+        points = max(0, int(points))
+
+        findings.append({
+            "source": source,
+            "finding": message,
+            "points": points,
+        })
+        score += points
+
+    # 1. Email phishing evidence
+    email_result = email_result or {}
+    try:
+        email_score = int(email_result.get("risk_score") or 0)
+    except (TypeError, ValueError):
+        email_score = 0
+
+    email_score = max(0, min(email_score, 30))
+
+    if email_score:
+        add_finding(
+            "Email analysis",
+            f"Phishing analysis produced a risk score of {email_score}.",
+            email_score,
+        )
+
+    phrases = email_result.get("matched_phishing_phrases") or []
+    if isinstance(phrases, list):
+        for phrase in phrases:
+            if isinstance(phrase, str):
+                add_finding(
+                    "Email analysis",
+                    f"Potentially manipulative wording: {phrase}",
+                )
+
+    # 2. Attachment evidence
+    for attachment in attachment_results or []:
+        filename = attachment.get("file_name", "Unknown file")
+        verdict = str(
+            attachment.get("malware_verdict", "UNKNOWN")
+        ).strip().upper()
+
+        extension = (
+            filename.lower().rsplit(".", 1)[-1]
+            if "." in filename else ""
+        )
+
+        if extension in {
+            "exe", "dll", "scr", "bat", "cmd",
+            "ps1", "vbs", "js"
+        }:
+            malware_suspicious = True
+            add_finding(
+                "Attachment analysis",
+                f"Potentially risky executable/script file type: {filename}",
+                10,
+            )
+
+        defender = attachment.get("defender") or {}
+        defender_status = str(
+            defender.get("status", "UNKNOWN")
+        ).strip().upper()
+
+        if defender_status in {
+            "THREAT_FOUND", "THREATS_FOUND", "MALWARE_FOUND",
+            "INFECTED", "MALICIOUS", "DETECTED"
+        }:
+            malware_confirmed = True
+            add_finding(
+                "Microsoft Defender",
+                f"Defender reported a threat in {filename}.",
+                40,
+            )
+        elif defender_status not in {
+            "NO_THREATS_FOUND", "NO_THREAT_FOUND", "CLEAN", "OK"
+        }:
+            scan_incomplete = True
+            add_finding(
+                "Microsoft Defender",
+                f"Defender did not provide a conclusive result for {filename}.",
+            )
+
+        vt = attachment.get("virustotal") or {}
+        vt_status = str(
+            vt.get("status", "UNKNOWN")
+        ).strip().upper()
+
+        stats = (
+            vt.get("last_analysis_stats")
+            or vt.get("stats")
+            or {}
+        )
+
+        try:
+            malicious_count = int(stats.get("malicious", 0) or 0)
+            suspicious_count = int(stats.get("suspicious", 0) or 0)
+        except (TypeError, ValueError):
+            malicious_count = 0
+            suspicious_count = 0
+
+        if vt_status in {
+            "MALICIOUS", "THREAT_FOUND", "THREATS_FOUND", "INFECTED"
+        } or malicious_count > 0:
+            malware_confirmed = True
+            add_finding(
+                "VirusTotal",
+                f"VirusTotal reported malicious evidence for {filename}.",
+                40,
+            )
+        elif suspicious_count > 0:
+            malware_suspicious = True
+            add_finding(
+                "VirusTotal",
+                f"VirusTotal reported suspicious evidence for {filename}.",
+                15,
+            )
+
+        elif vt_status in {
+            "NOT FOUND", "NOT_FOUND", "UNKNOWN", "ERROR",
+            "REQUEST ERROR", "FAILED", "UNAVAILABLE",
+            "TIMEOUT", "SKIPPED", ""
+        }:
+            scan_incomplete = True
+            add_finding(
+                "VirusTotal",
+                f"No conclusive VirusTotal result is available for {filename}.",
+            )
+        elif vt_status not in {
+            "COMPLETED", "ANALYSIS_COMPLETE", "OK"
+        }:
+            scan_incomplete = True
+            add_finding(
+                "VirusTotal",
+                f"Unrecognized VirusTotal status for {filename}: {vt_status}.",
+            )
+
+        # Consume the normalized attachment verdict.
+        if verdict == "MALICIOUS_INDICATORS_DETECTED":
+            malware_confirmed = True
+            add_finding(
+                "Attachment analysis",
+                f"Malicious indicators were detected in {filename}.",
+                40,
+            )
+        elif verdict == "SUSPICIOUS_REQUIRES_REVIEW":
+            malware_suspicious = True
+            add_finding(
+                "Attachment analysis",
+                f"Suspicious indicators require review in {filename}.",
+                10,
+            )
+        elif verdict in {
+            "INCOMPLETE_SCAN", "UNKNOWN_REQUIRES_REVIEW"
+        }:
+            scan_incomplete = True
+            add_finding(
+                "Attachment analysis",
+                f"Attachment analysis is incomplete or inconclusive for {filename}.",
+            )
+
+    # 3. Optional separate YARA results
+    if yara_results is not None:
+        yara_items = (
+            yara_results if isinstance(yara_results, list)
+            else [yara_results]
+        )
+
+        for item in yara_items:
+            if not isinstance(item, dict):
+                continue
+
+            status = str(item.get("status", "")).strip().upper()
+            matches = item.get(
+                "matches",
+                item.get("matched_rules", [])
+            )
+
+            if isinstance(matches, str):
+                matches = [matches]
+
+            if matches:
+                malware_suspicious = True
+
+                for match in matches:
+                    if isinstance(match, dict):
+                        rule_name = match.get(
+                            "rule", match.get("name", str(match))
+                        )
+                    else:
+                        rule_name = str(match)
+
+                    add_finding(
+                        "YARA",
+                        f"YARA rule matched: {rule_name}",
+                        15,
+                    )
+
+            elif status in {
+                "ERROR", "FAILED", "UNAVAILABLE",
+                "RULES_NOT_FOUND"
+            }:
+                scan_incomplete = True
+                add_finding(
+                    "YARA",
+                    "YARA scan did not produce a conclusive result.",
+                )
+
+    # 4. Final score and verdict
+    score = min(score, 100)
+
+    if score >= 70:
+        level = "CRITICAL"
+    elif score >= 40:
+        level = "HIGH"
+    elif score >= 20:
+        level = "MODERATE"
+    else:
+        level = "LOW"
+
+    if malware_confirmed:
+        verdict = "MALWARE DETECTED"
+    elif malware_suspicious:
+        verdict = "SUSPICIOUS - INVESTIGATION REQUIRED"
+    elif scan_incomplete:
+        verdict = "INCONCLUSIVE - INVESTIGATION REQUIRED"
+    elif email_score >= 20:
+        verdict = "POTENTIAL PHISHING"
+    else:
+        verdict = "NO THREAT CONFIRMED"
+
+    if malware_confirmed:
+        recommendation = (
+            "Isolate the affected file or endpoint and follow incident "
+            "response procedures."
+        )
+    elif scan_incomplete:
+        recommendation = (
+            "Investigate unavailable or inconclusive scan results before "
+            "treating the email or attachments as safe."
+        )
+    elif malware_suspicious or email_score >= 20:
+        recommendation = (
+            "Do not open suspicious attachments or follow suspicious links. "
+            "Review the evidence before deciding."
+        )
+    else:
+        recommendation = (
+            "No threat was confirmed by the available evidence. "
+            "This does not guarantee safety."
+        )
+
+    return {
+        "risk_score": score,
+        "risk_level": level,
+        "verdict": verdict,
+        "recommended_action": recommendation,
+        "malware_confirmed": malware_confirmed,
+        "malware_suspicious": malware_suspicious,
+        "scan_incomplete": scan_incomplete,
+        "findings": findings,
+        "limitations": [
+            "The score is heuristic and is not a calibrated probability.",
+            "YARA matches require rule-specific interpretation.",
+            "A missing VirusTotal report does not prove a file is clean or malicious.",
+            "A clean result from one scanner does not guarantee safety.",
+        ],
+    }
+
+
+========== CELL 110 ==========
+
+import os
+
+def classify_attachment_evidence(attachment):
+    """Classify attachment evidence without treating missing scans as clean."""
+
+    attachment = attachment or {}
+    defender = attachment.get("defender") or {}
+    yara = attachment.get("yara") or {}
+    vt = attachment.get("virustotal") or {}
+
+    verdict = str(attachment.get("malware_verdict") or "").strip().upper()
+    defender_status = str(defender.get("status") or "").strip().upper()
+    yara_status = str(yara.get("status") or "").strip().upper()
+    vt_status = str(vt.get("status") or "").strip().upper()
+
+    findings = []
+    confirmed = False
+    suspicious = False
+    incomplete = False
+
+    # Explicit verdicts produced by the existing detection pipeline.
+    if verdict in {
+        "MALICIOUS",
+        "CONFIRMED_MALICIOUS",
+        "MALICIOUS_INDICATORS_DETECTED",
+    }:
+        confirmed = True
+        findings.append("Malicious verdict reported by the detection pipeline.")
+
+    # Defender must explicitly report a threat; a clean scan is not a detection.
+    if defender_status in {"THREATS_FOUND", "MALICIOUS", "DETECTED"}:
+        confirmed = True
+        findings.append("Microsoft Defender reported a threat.")
+
+    # A positive VirusTotal malicious count is threat evidence.
+    stats = vt.get("stats") or vt.get("last_analysis_stats") or {}
+    try:
+        malicious_count = int(stats.get("malicious", 0) or 0)
+        suspicious_count = int(stats.get("suspicious", 0) or 0)
+    except (TypeError, ValueError):
+        malicious_count = 0
+        suspicious_count = 0
+        incomplete = True
+        findings.append("VirusTotal returned invalid detection statistics.")
+
+    if malicious_count > 0:
+        confirmed = True
+        findings.append(
+            f"VirusTotal reported {malicious_count} malicious detection(s)."
+        )
+
+    if yara_status in {"MATCH", "MATCHES", "DETECTION", "DETECTED"}:
+        suspicious = True
+        findings.append("YARA reported a rule match requiring investigation.")
+
+    if suspicious_count > 0:
+        suspicious = True
+        findings.append(
+            f"VirusTotal reported {suspicious_count} suspicious detection(s)."
+        )
+
+    # Missing, unavailable, or failed scanner results are incomplete.
+    if defender_status not in {
+        "NO_THREATS_FOUND", "THREATS_FOUND", "MALICIOUS", "DETECTED"
+    }:
+        incomplete = True
+        findings.append("Microsoft Defender result is missing or inconclusive.")
+
+    if yara_status not in {
+        "NO_MATCH", "NO_MATCHES", "MATCH", "MATCHES", "DETECTION", "DETECTED"
+    }:
+        incomplete = True
+        findings.append("YARA result is missing or inconclusive.")
+
+    vt_complete = vt_status in {"COMPLETED", "ANALYSIS_COMPLETED"}
+    if not vt_complete:
+        incomplete = True
+        findings.append("VirusTotal result is unavailable or incomplete.")
+
+    # A risky extension is a reason for review, not proof of malware.
+    filename = attachment.get("file_name") or attachment.get("filename") or ""
+    if os.path.splitext(filename)[1].lower() in {
+        ".exe", ".dll", ".scr", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".msi"
+    }:
+        suspicious = True
+        findings.append("Executable or script attachment requires extra scrutiny.")
+
+    # A clean verdict requires completed scans and no positive detections.
+    clean = (
+        not confirmed
+        and not suspicious
+        and not incomplete
+        and verdict == "CLEAN"
+        and defender_status == "NO_THREATS_FOUND"
+        and yara_status in {"NO_MATCH", "NO_MATCHES"}
+        and vt_complete
+        and malicious_count == 0
+        and suspicious_count == 0
+    )
+
+    if confirmed:
+        classification = "CONFIRMED_MALICIOUS"
+    elif suspicious:
+        classification = "SUSPICIOUS"
+    elif incomplete:
+        classification = "UNKNOWN_REQUIRES_REVIEW"
+    elif clean:
+        classification = "CLEAN"
+    else:
+        classification = "UNKNOWN_REQUIRES_REVIEW"
+        incomplete = True
+        findings.append("Evidence is insufficient to establish a clean result.")
+
+    return {
+        "classification": classification,
+        "confirmed_malware": confirmed,
+        "suspicious_malware": suspicious,
+        "scan_incomplete": incomplete,
+        "clean": clean,
+        "findings": findings,
+    }
+
+
+print("Malware evidence classifier loaded.")
+
+
+========== CELL 111 ==========
+
+classifier_tests = [
+    (
+        "Unknown VirusTotal report",
+        {
+            "file_name": "unknown.exe",
+            "malware_verdict": "UNKNOWN",
+            "defender": {"status": "NO_THREATS_FOUND"},
+            "virustotal": {"status": "NOT FOUND"},
+        },
+        "SUSPICIOUS",
+    ),
+    (
+        "Confirmed malicious indicator",
+        {
+            "file_name": "test.exe",
+            "malware_verdict": "MALICIOUS_INDICATORS_DETECTED",
+        },
+        "CONFIRMED_MALICIOUS",
+    ),
+    (
+        "Suspicious executable",
+        {
+            "file_name": "invoice.exe",
+            "malware_verdict": "UNKNOWN",
+            "defender": {"status": "NO_THREATS_FOUND"},
+            "virustotal": {"status": "NOT FOUND"},
+        },
+        "SUSPICIOUS",
+    ),
+    (
+        "Clean scanner results",
+        {
+            "file_name": "document.txt",
+            "malware_verdict": "CLEAN",
+            "defender": {"status": "NO_THREATS_FOUND"},
+            "yara": {"status": "NO_MATCH"},
+            "virustotal": {
+                "status": "COMPLETED",
+                "stats": {
+                    "malicious": 0,
+                    "suspicious": 0,
+                    "undetected": 60,
+                },
+            },
+        },
+        "CLEAN",
+    ),
+]
+
+classifier_results = []
+
+for name, attachment, expected in classifier_tests:
+    result = classify_attachment_evidence(attachment)
+    passed = result["classification"] == expected
+    classifier_results.append(passed)
+
+    print(
+        f"{'PASS' if passed else 'FAIL'} | {name} | "
+        f"actual={result['classification']} | expected={expected}"
+    )
+
+print(
+    f"\nClassifier tests passed: "
+    f"{sum(classifier_results)}/{len(classifier_results)}"
+)
+
+
+========== CELL 112 ==========
+
+def enhance_combined_assessment_v2(
+    base_assessment,
+    email_phishing_result,
+    attachment_results,
+):
+    """Integrate attachment evidence with the existing risk assessment."""
+
+    # Preserve your existing assessment logic.
+    assessment = enhance_combined_assessment(
+        base_assessment=base_assessment,
+        email_phishing_result=email_phishing_result,
+        attachment_results=attachment_results,
+    )
+
+    findings = list(assessment.get("findings") or [])
+    attachment_evidence = [
+        classify_attachment_evidence(item)
+        for item in attachment_results
+    ]
+
+    confirmed = any(
+        item["confirmed_malware"] for item in attachment_evidence
+    )
+    suspicious = any(
+        item["suspicious_malware"] for item in attachment_evidence
+    )
+    incomplete = any(
+        item["scan_incomplete"] for item in attachment_evidence
+    )
+
+    # Preserve the existing score; do not add the same evidence twice.
+    score = max(0, min(100, int(assessment.get("risk_score", 0) or 0)))
+
+    if confirmed:
+        score = max(score, 85)
+        risk_level = "CRITICAL"
+        verdict = "CONFIRMED MALWARE DETECTED"
+        action = (
+            "Isolate the attachment and follow incident-response "
+            "procedures. Do not open or execute the file."
+        )
+    elif score >= 70:
+        risk_level = "HIGH"
+        verdict = "HIGH RISK - INVESTIGATION REQUIRED"
+        action = (
+            "Hold the message for investigation. Do not open attachments "
+            "or follow links."
+        )
+    elif suspicious or score >= 35:
+        score = max(score, 35)
+        risk_level = "MEDIUM"
+        verdict = "SUSPICIOUS - INVESTIGATION REQUIRED"
+        action = (
+            "Hold or quarantine suspicious attachments and investigate "
+            "the available scanner results."
+        )
+    elif incomplete:
+        risk_level = "LOW — INCOMPLETE SCAN"
+        verdict = "REVIEW - SCANS INCOMPLETE"
+        action = (
+            "Some scanner results are unavailable. Do not treat this "
+            "assessment as proof that the email or attachments are safe."
+        )
+    else:
+        risk_level = "LOW"
+        verdict = "NO STRONG THREAT EVIDENCE IDENTIFIED"
+        action = (
+            "No strong threat evidence was identified. A low score does "
+            "not prove that the message or files are safe."
+        )
+
+    for index, evidence in enumerate(attachment_evidence):
+        filename = (
+            attachment_results[index].get("file_name")
+            or attachment_results[index].get("filename")
+            or f"Attachment {index + 1}"
+        )
+
+        for message in evidence["findings"]:
+            finding = {
+                "source": f"Attachment evidence: {filename}",
+                "finding": message,
+                "points": 0,
+            }
+            if finding not in findings:
+                findings.append(finding)
+
+    assessment.update({
+        "risk_score": score,
+        "risk_level": risk_level,
+        "verdict": verdict,
+        "recommended_action": action,
+        "malware_confirmed": confirmed,
+        "malware_suspicious": suspicious,
+        "scan_incomplete": incomplete,
+        "findings": findings,
+        "attachment_evidence": attachment_evidence,
+    })
+
+    return assessment
+
+
+print("Integrated assessment function loaded.")
+
+
+========== CELL 113 ==========
+
+def scan_with_yara_source(file_path, rules_source=None):
+    """Scan a file using YARA rules stored in a Python string."""
+
+    from pathlib import Path
+
+    try:
+        import yara
+    except ImportError:
+        return {
+            "status": "UNAVAILABLE",
+            "matches": [],
+            "message": "The Python YARA package is not installed."
+        }
+
+    file_path = Path(file_path)
+
+    if not file_path.is_file():
+        return {
+            "status": "ERROR",
+            "matches": [],
+            "message": "The attachment file does not exist."
+        }
+
+    if rules_source is None:
+        rules_source = globals().get("yara_rules")
+
+    if not isinstance(rules_source, str) or not rules_source.strip():
+        return {
+            "status": "RULES_NOT_FOUND",
+            "matches": [],
+            "message": "No YARA rule source is configured."
+        }
+
+    try:
+        compiled_rules = yara.compile(source=rules_source)
+        matches = compiled_rules.match(str(file_path))
+        matched_rules = [match.rule for match in matches]
+
+        return {
+            "status": "MATCH" if matched_rules else "NO_MATCH",
+            "matches": matched_rules,
+            "message": (
+                "YARA rules matched the file."
+                if matched_rules
+                else "No configured YARA rules matched."
+            )
+        }
+
+    except Exception as error:
+        return {
+            "status": "ERROR",
+            "matches": [],
+            "message": str(error)
+        }

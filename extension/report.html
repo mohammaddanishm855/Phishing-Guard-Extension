@@ -1,0 +1,93 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phishing Guard Security Report</title>
+    <link rel="stylesheet" href="report.css">
+</head>
+<body>
+
+    <main class="dashboard">
+
+        <header class="header">
+            <div class="brand">
+                <div class="brand-icon">🛡️</div>
+                <div>
+                    <h1>PHISHING GUARD</h1>
+                    <p>WEBSITE SECURITY INTELLIGENCE</p>
+                </div>
+            </div>
+            <span class="report-label">SECURITY REPORT</span>
+        </header>
+
+        <section class="website-card">
+            <p class="eyebrow">SCANNED WEBSITE</p>
+            <h2 id="websiteName">Analyzing website...</h2>
+            <p id="websiteUrl" class="website-url"></p>
+            <p id="scanTime" class="scan-time"></p>
+        </section>
+
+        <section class="risk-card">
+            <div class="risk-score">
+                <div id="riskScore" class="score">--</div>
+                <span>RISK SCORE / 100</span>
+            </div>
+
+            <div class="risk-details">
+                <span id="riskBadge" class="risk-badge">ANALYZING</span>
+                <h2 id="verdict">Waiting for scan result</h2>
+                <p id="riskDescription"></p>
+            </div>
+        </section>
+
+        <section class="section-card">
+            <h2>Security Findings</h2>
+            <div id="findings" class="findings">
+                Waiting for scan results...
+            </div>
+        </section>
+
+        <section class="section-card">
+            <h2>Detection Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span>Risk Indicators</span>
+                    <strong id="indicatorCount">--</strong>
+                </div>
+                <div class="summary-item">
+                    <span>Sensitive Terms</span>
+                    <strong id="sensitiveCount">--</strong>
+                </div>
+                <div class="summary-item">
+                    <span>Brand Impersonation</span>
+                    <strong id="brandCount">--</strong>
+                </div>
+                <div class="summary-item">
+                    <span>Detection Method</span>
+                    <strong id="detectionMethod">--</strong>
+                </div>
+            </div>
+        </section>
+
+        <section class="section-card">
+            <h2>Security Recommendations</h2>
+            <div id="recommendations"></div>
+        </section>
+
+        <section class="section-card">
+            <h2>Scan Limitations</h2>
+            <ul id="limitations"></ul>
+        </section>
+
+        <footer>
+            <p>PHISHING GUARD | BROWSER SECURITY SYSTEM</p>
+            <p>Automated heuristic assessment. Not a guarantee of website safety.</p>
+        </footer>
+
+    </main>
+
+    <script src="report.js"></script>
+</body>
+</html>

@@ -1,0 +1,328 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --background: #080e1b;
+    --surface: #111c2e;
+    --surface-light: #17253a;
+    --border: rgba(148, 163, 184, 0.15);
+    --cyan: #22d3ee;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --red: #fb7185;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    min-height: 100vh;
+    padding: 35px 20px;
+    background:
+        radial-gradient(circle at top right, rgba(8, 145, 178, 0.12), transparent 35%),
+        var(--background);
+    color: var(--text);
+    font-family: 'Inter', Arial, sans-serif;
+}
+
+.dashboard {
+    max-width: 950px;
+    margin: auto;
+}
+
+/* HEADER */
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding-bottom: 25px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 25px;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.brand-icon {
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    font-size: 27px;
+    background: linear-gradient(135deg, #164e63, #1d4ed8);
+    box-shadow: 0 0 25px rgba(34, 211, 238, 0.15);
+}
+
+.brand h1 {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #e0faff;
+}
+
+.brand p,
+.report-label,
+.eyebrow {
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    margin-top: 5px;
+}
+
+.report-label {
+    padding: 9px 13px;
+    border: 1px solid rgba(34, 211, 238, 0.25);
+    border-radius: 20px;
+    color: var(--cyan);
+    white-space: nowrap;
+}
+
+/* WEBSITE */
+
+.website-card,
+.risk-card,
+.section-card {
+    background: linear-gradient(145deg, #142238, #0d1727);
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    padding: 25px;
+    margin-bottom: 20px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+}
+
+.website-card h2 {
+    margin-top: 12px;
+    font-size: 23px;
+}
+
+.website-url {
+    margin-top: 9px;
+    color: var(--cyan);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.scan-time {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+/* RISK ASSESSMENT */
+
+.risk-card {
+    display: flex;
+    align-items: center;
+    gap: 35px;
+    padding: 30px;
+}
+
+.risk-score {
+    min-width: 150px;
+    text-align: center;
+}
+
+.score {
+    font-size: 65px;
+    font-weight: 800;
+    letter-spacing: -3px;
+    color: var(--cyan);
+}
+
+.risk-score span {
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.risk-details {
+    flex: 1;
+}
+
+.risk-badge {
+    display: inline-block;
+    padding: 7px 12px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    background: rgba(148, 163, 184, 0.15);
+    color: var(--muted);
+}
+
+.risk-details h2 {
+    margin-top: 14px;
+    font-size: 20px;
+}
+
+.risk-details p {
+    margin-top: 9px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.risk-low .score,
+.risk-low .risk-badge {
+    color: var(--green);
+}
+
+.risk-medium .score,
+.risk-medium .risk-badge {
+    color: var(--yellow);
+}
+
+.risk-high .score,
+.risk-high .risk-badge {
+    color: var(--red);
+}
+
+.risk-low .risk-badge {
+    background: rgba(52, 211, 153, 0.12);
+}
+
+.risk-medium .risk-badge {
+    background: rgba(251, 191, 36, 0.12);
+}
+
+.risk-high .risk-badge {
+    background: rgba(251, 113, 133, 0.12);
+}
+
+/* SECTIONS */
+
+.section-card h2 {
+    font-size: 16px;
+    margin-bottom: 20px;
+}
+
+.finding-item {
+    display: flex;
+    gap: 13px;
+    align-items: flex-start;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    margin-bottom: 10px;
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.finding-icon {
+    font-size: 17px;
+}
+
+.finding-item strong {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 5px;
+}
+
+.finding-item p {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.no-findings {
+    color: var(--green);
+    font-size: 12px;
+    padding: 13px;
+    background: rgba(52, 211, 153, 0.07);
+    border-radius: 8px;
+}
+
+/* SUMMARY */
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.summary-item {
+    padding: 17px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.summary-item span {
+    display: block;
+    color: var(--muted);
+    font-size: 10px;
+}
+
+.summary-item strong {
+    display: block;
+    margin-top: 9px;
+    font-size: 19px;
+    color: var(--cyan);
+    overflow-wrap: anywhere;
+}
+
+/* RECOMMENDATIONS */
+
+.recommendation-item {
+    padding: 12px 14px;
+    margin-bottom: 9px;
+    border-left: 3px solid var(--cyan);
+    background: rgba(34, 211, 238, 0.06);
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* LIMITATIONS */
+
+#limitations {
+    padding-left: 20px;
+}
+
+#limitations li {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.8;
+    margin-bottom: 6px;
+}
+
+/* FOOTER */
+
+footer {
+    padding: 20px 0;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    color: #64748b;
+    font-size: 10px;
+    line-height: 1.8;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 600px) {
+    body {
+        padding: 15px 10px;
+    }
+
+    .risk-card {
+        flex-direction: column;
+        text-align: center;
+        gap: 20px;
+    }
+
+    .header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
